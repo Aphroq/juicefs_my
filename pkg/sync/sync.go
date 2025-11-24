@@ -278,7 +278,7 @@ func copyPerms(dst object.ObjectStorage, obj object.Object, config *Config) {
 	start := time.Now()
 	key := obj.Key()
 	fi := obj.(object.File)
-	if !fi.IsSymlink() || !config.Links {
+	if !fi.IsSymlink() || config.Links {
 		// chmod needs to be executed after chown, because chown will change setuid setgid to be invalid.
 		if err := dst.(object.FileSystem).Chown(key, fi.Owner(), fi.Group()); err != nil {
 			logger.Warnf("Chown %s to (%s,%s): %s", key, fi.Owner(), fi.Group(), err)
