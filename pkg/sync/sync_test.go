@@ -796,3 +796,207 @@ func TestFilterSizeAndAge(t *testing.T) {
 		t.Fatalf("filterKey should fail")
 	}
 }
+
+func TestCopyPerms(t *testing.T) {
+	defer func() {
+		_ = os.RemoveAll("/tmp/test_copyperms")
+	}()
+
+	// Create test directory
+	testDir := "/tmp/test_copyperms"
+	_ = os.MkdirAll(testDir, 0755)
+
+	// Test case 1: Regular file should always copy permissions regardless of config.Links
+	t.Run("Regular file with Links=false", func(t *testing.T) {
+		srcDir := testDir + "/src1"
+		dstDir := testDir + "/dst1"
+		_ = os.MkdirAll(srcDir, 0755)
+		_ = os.MkdirAll(dstDir, 0755)
+
+		// Create a regular file with specific permissions
+		regularFile := srcDir + "/regular.txt"
+		_ = os.WriteFile(regularFile, []byte("test"), 0644)
+		_ = os.Chmod(regularFile, 0600)
+
+		// Sync without Links flag
+		src, _ := object.CreateStorage("file", srcDir+"/", "", "", "")
+		dst, _ := object.CreateStorage("file", dstDir+"/", "", "", "")
+
+		config := &Config{
+			Threads:     1,
+			Update:      true,
+			Perms:       true,
+			Links:       false,
+			Quiet:       true,
+			ListThreads: 1,
+			Limit:       -1,
+			MaxSize:     math.MaxInt64,
+		}
+
+		if err := Sync(src, dst, config); err != nil {
+			t.Fatalf("sync failed: %s", err)
+		}
+
+		// Verify permissions were copied
+		dstFile := dstDir + "/regular.txt"
+		info, err := os.Stat(dstFile)
+		if err != nil {
+			t.Fatalf("failed to stat destination file: %s", err)
+		}
+
+		if info.Mode().Perm() != 0600 {
+			t.Errorf("Regular file permissions not copied correctly: got %o, want %o", info.Mode().Perm(), 0600)
+		}
+	})
+
+	// Test case 2: Regular file with Links=true should also copy permissions
+	t.Run("Regular file with Links=true", func(t *testing.T) {
+		srcDir := testDir + "/src2"
+		dstDir := testDir + "/dst2"
+		_ = os.MkdirAll(srcDir, 0755)
+		_ = os.MkdirAll(dstDir, 0755)
+
+		// Create a regular file with specific permissions
+		regularFile := srcDir + "/regular.txt"
+		_ = os.WriteFile(regularFile, []byte("test"), 0755)
+
+		// Sync with Links flag
+		src, _ := object.CreateStorage("file", srcDir+"/", "", "", "")
+		dst, _ := object.CreateStorage("file", dstDir+"/", "", "", "")
+
+		config := &Config{
+			Threads:     1,
+			Update:      true,
+			Perms:       true,
+			Links:       true,
+			Quiet:       true,
+			ListThreads: 1,
+			Limit:       -1,
+			MaxSize:     math.MaxInt64,
+		}
+
+		if err := Sync(src, dst, config); err != nil {
+			t.Fatalf("sync failed: %s", err)
+		}
+
+		// Verify permissions were copied
+		dstFile := dstDir + "/regular.txt"
+		info, err := os.Stat(dstFile)
+		if err != nil {
+			t.Fatalf("failed to stat destination file: %s", err)
+		}
+
+		if info.Mode().Perm() != 0755 {
+			t.Errorf("Regular file permissions not copied correctly: got %o, want %o", info.Mode().Perm(), 0755)
+		}
+	})
+
+	// Test case 3: Symlink with Links=true should copy permissions
+	t.Run("Symlink with Links=true", func(t *testing.T) {
+		srcDir := testDir + "/src3"
+		dstDir := testDir + "/dst3"
+		_ = os.MkdirAll(srcDir, 0755)
+		_ = os.MkdirAll(dstDir, 0755)
+
+		// Create target file
+		targetFile := srcDir + "/target.txt"
+		_ = os.WriteFile(targetFile, []byte("target"), 0644)
+
+		// Create symlink
+		symlinkPath := srcDir + "/link.txt"
+		_ = os.Symlink(targetFile, symlinkPath)
+
+		// Sync with Links flag
+		src, _ := object.CreateStorage("file", srcDir+"/", "", "", "")
+		dst, _ := object.CreateStorage("file", dstDir+"/", "", "", "")
+
+		config := &Config{
+			Threads:     1,
+			Update:      true,
+			Perms:       true,
+			Links:       true,
+			Quiet:       true,
+			ListThreads: 1,
+			Limit:       -1,
+			MaxSize:     math.MaxInt64,
+		}
+
+		if err := Sync(src, dst, config); err != nil {
+			t.Fatalf("sync failed: %s", err)
+		}
+
+		// Verify symlink was created
+		dstLink := dstDir + "/link.txt"
+		linkInfo, err := os.Lstat(dstLink)
+		if err != nil {
+			t.Fatalf("failed to lstat destination symlink: %s", err)
+		}
+
+		if linkInfo.Mode()&os.ModeSymlink == 0 {
+			t.Errorf("Destination is not a symlink")
+		}
+
+		// Verify target was also copied
+		dstTarget := dstDir + "/target.txt"
+		if _, err := os.Stat(dstTarget); err != nil {
+			t.Errorf("Target file not copied: %s", err)
+		}
+	})
+
+	// Test case 4: Symlink with Links=false should follow the link and copy as regular file
+	t.Run("Symlink with Links=false", func(t *testing.T) {
+		srcDir := testDir + "/src4"
+		dstDir := testDir + "/dst4"
+		_ = os.MkdirAll(srcDir, 0755)
+		_ = os.MkdirAll(dstDir, 0755)
+
+		// Create target file
+		targetFile := srcDir + "/target.txt"
+		_ = os.WriteFile(targetFile, []byte("target content"), 0644)
+
+		// Create symlink
+		symlinkPath := srcDir + "/link.txt"
+		_ = os.Symlink(targetFile, symlinkPath)
+
+		// Sync without Links flag (should follow symlink)
+		src, _ := object.CreateStorage("file", srcDir+"/", "", "", "")
+		dst, _ := object.CreateStorage("file", dstDir+"/", "", "", "")
+
+		config := &Config{
+			Threads:     1,
+			Update:      true,
+			Perms:       true,
+			Links:       false,
+			Quiet:       true,
+			ListThreads: 1,
+			Limit:       -1,
+			MaxSize:     math.MaxInt64,
+		}
+
+		if err := Sync(src, dst, config); err != nil {
+			t.Fatalf("sync failed: %s", err)
+		}
+
+		// Verify the link was followed and content copied as a regular file
+		dstFile := dstDir + "/link.txt"
+		linkInfo, err := os.Lstat(dstFile)
+		if err != nil {
+			t.Fatalf("failed to lstat destination file: %s", err)
+		}
+
+		// Should be a regular file, not a symlink
+		if linkInfo.Mode()&os.ModeSymlink != 0 {
+			t.Errorf("Destination should be a regular file, not a symlink")
+		}
+
+		// Verify content is correct
+		content, err := os.ReadFile(dstFile)
+		if err != nil {
+			t.Fatalf("failed to read destination file: %s", err)
+		}
+
+		if string(content) != "target content" {
+			t.Errorf("Content mismatch: got %q, want %q", string(content), "target content")
+		}
+	})
+}
